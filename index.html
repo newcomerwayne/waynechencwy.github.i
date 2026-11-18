@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Flicker Suppression 調適工具 · Demo</title>
+<style>
+:root{
+  --bg:#E8ECF0; --panel:#FBFCFD; --sunk:#F1F4F7; --ink:#18212B; --muted:#5B6875; --line:#C9D1DA; --line-soft:#DDE3E9;
+  --accent:#1E5AA8; --accent-ink:#FFFFFF; --neg:#2F74D0; --pos:#D2771E; --ok:#2E7D4F; --bad:#B3261E; --mark:#E0B400;
+  --sel:rgba(30,90,168,.16); --sel-line:#1E5AA8;
+  --sans:"Segoe UI","Microsoft JhengHei UI","Microsoft JhengHei","Noto Sans TC","PingFang TC",system-ui,sans-serif;
+  --mono:"Cascadia Mono",Consolas,"Roboto Mono","Menlo",monospace;
+  color-scheme:light;
+  box-sizing:border-box; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0F141A; --panel:#161D25; --sunk:#121820; --ink:#E2E8EF; --muted:#93A1AF; --line:#2B3642; --line-soft:#222B35;
+    --accent:#6EA2E8; --accent-ink:#0F141A; --neg:#5A9BF0; --pos:#E89A4A; --ok:#5DBB86; --bad:#F07A70; --mark:#F2CB3C;
+    --sel:rgba(110,162,232,.22); --sel-line:#6EA2E8; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0F141A; --panel:#161D25; --sunk:#121820; --ink:#E2E8EF; --muted:#93A1AF; --line:#2B3642; --line-soft:#222B35;
+  --accent:#6EA2E8; --accent-ink:#0F141A; --neg:#5A9BF0; --pos:#E89A4A; --ok:#5DBB86; --bad:#F07A70; --mark:#F2CB3C;
+  --sel:rgba(110,162,232,.22); --sel-line:#6EA2E8; color-scheme:dark;
+}
+*{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans)}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+/* header */
+.top{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:12px 20px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:env(safe-area-inset-top,0px);z-index:20}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:30;background:var(--panel)}
+.ident{display:flex;align-items:baseline;gap:10px;margin-right:auto}
+.ident h1{font-size:17px;font-weight:600;margin:0;letter-spacing:.01em}
+.ident .chip{font:12px var(--mono);color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:1px 6px}
+.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:6px 12px;white-space:nowrap}
+.btn:hover{border-color:var(--muted)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600;padding:7px 18px}
+.btn.small{padding:3px 9px;font-size:13px}
+.btn.danger{color:var(--bad)}
+input[type=file]{display:none}
+
+/* layout */
+.wrap{display:grid;grid-template-columns:minmax(0,1fr) var(--outW,440px);gap:16px;padding:16px 20px;align-items:start}
+@media (max-width:1180px){.wrap{grid-template-columns:minmax(0,1fr)}.hres{display:none}}
+.hres{position:absolute;left:-13px;top:0;bottom:0;width:10px;cursor:col-resize;touch-action:none;z-index:4}
+.hres::after{content:"";position:absolute;left:3px;top:50%;width:4px;height:44px;margin-top:-22px;border-radius:2px;background:var(--line)}
+.hres:hover::after,.hres.on::after,.hres:focus-visible::after{background:var(--accent)}
+.vres{height:9px;flex:0 0 9px;cursor:row-resize;touch-action:none;border-top:1px solid var(--line);position:relative;background:var(--panel)}
+.vres::after{content:"";position:absolute;left:50%;top:3px;width:44px;height:3px;margin-left:-22px;border-radius:2px;background:var(--line)}
+.vres:hover::after,.vres.on::after,.vres:focus-visible::after{background:var(--accent)}
+body.dragging{user-select:none}
+body.dragging.col{cursor:col-resize} body.dragging.row{cursor:row-resize}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;min-width:0}
+.tabs{display:flex;gap:2px;padding:0 12px;border-bottom:1px solid var(--line)}
+.tab{border:0;background:none;padding:11px 14px 9px;border-bottom:2px solid transparent;color:var(--muted);font-weight:500}
+.tab[aria-selected=true]{color:var(--ink);border-bottom-color:var(--accent)}
+.tab .badge{font:11px var(--mono);background:var(--sunk);border:1px solid var(--line);border-radius:9px;padding:0 6px;margin-left:6px;color:var(--muted)}
+.view{padding:14px 16px 18px}
+.view[hidden]{display:none}
+
+/* toolbar */
+.toolbar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin-bottom:12px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{border:0;background:var(--panel);padding:4px 11px;font-size:13px;color:var(--muted)}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed=true]{background:var(--sunk);color:var(--ink);font-weight:600}
+.group{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
+.group input{width:72px;padding:3px 6px;border:1px solid var(--line);border-radius:5px;background:var(--panel);font-family:var(--mono)}
+.selinfo{font:12px var(--mono);color:var(--muted);margin-left:auto}
+
+/* grid */
+.gridbox{overflow:auto;border:1px solid var(--line);border-radius:6px;max-height:calc(100vh - 230px);background:var(--panel)}
+table.grid{border-collapse:separate;border-spacing:0;font:12px var(--mono);user-select:none}
+.grid th,.grid td{border-right:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft);padding:0}
+.grid thead th{position:sticky;top:0;background:var(--sunk);z-index:3;font-weight:600;color:var(--muted);height:44px;vertical-align:bottom;padding:4px 2px;cursor:pointer}
+.grid thead th .gv{display:block;color:var(--ink);font-size:13px}
+.grid thead th .gl{display:block;font-size:10px;font-weight:400}
+.grid thead th.newpt{box-shadow:inset 0 -2px 0 var(--accent)}
+.grid thead th.newpt .gl{color:var(--accent)}
+.grid thead th.corner{left:0;z-index:5;text-align:left;padding-left:10px;cursor:default;font-family:var(--sans);font-weight:500}
+.grid th.rh{position:sticky;left:0;background:var(--panel);z-index:2;text-align:left;font-weight:400;padding:0 8px 0 6px;white-space:nowrap;border-right:1px solid var(--line)}
+.rh label{display:flex;align-items:center;gap:7px;height:28px}
+.rh .nm{font-family:var(--mono);font-size:12px;cursor:pointer;min-width:104px}
+.rh .ad{font-size:11px;color:var(--muted)}
+.rh input{margin:0;accent-color:var(--accent)}
+tr.off td input{opacity:.38}
+tr.grp th.rh,tr.grp td{border-top:2px solid var(--line)}
+.grid td{position:relative;width:46px;min-width:46px}
+.grid td input{width:100%;height:28px;border:0;background:transparent;text-align:center;font:inherit;color:var(--ink);padding:0;caret-color:var(--accent)}
+.grid td input:focus{outline:2px solid var(--accent);outline-offset:-2px;position:relative;z-index:1}
+.grid td.sel::after{content:"";position:absolute;inset:0;background:var(--sel);pointer-events:none;box-shadow:inset 0 0 0 1px var(--sel-line)}
+.grid td.chg::before{content:"";position:absolute;top:2px;right:2px;width:5px;height:5px;border-radius:50%;background:var(--mark);pointer-events:none}
+.grid td.bad input{color:var(--bad);font-weight:700}
+.legend{display:flex;gap:16px;align-items:center;font-size:12px;color:var(--muted);margin-top:10px;flex-wrap:wrap}
+.ramp{width:200px;height:10px;border-radius:2px;border:1px solid var(--line)}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--mark);margin-right:5px}
+
+/* settings */
+.settings{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:22px 28px}
+fieldset{border:0;margin:0;padding:0;min-width:0}
+legend{font-weight:600;font-size:14px;padding:0;margin-bottom:4px}
+.hint{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+.row{display:grid;grid-template-columns:1fr 110px 54px;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--line-soft)}
+.row:last-child{border-bottom:0}
+.row .k{font-size:13px}
+.row .k small{display:block;color:var(--muted);font:11px var(--mono)}
+.row input[type=number],.row select{width:100%;padding:4px 6px;border:1px solid var(--line);border-radius:5px;background:var(--panel);font-family:var(--mono)}
+.row .hx{font:12px var(--mono);color:var(--muted);text-align:right}
+.row.err input{border-color:var(--bad);color:var(--bad)}
+.switch{display:flex;align-items:center;gap:8px;font-size:13px;padding:6px 0}
+.switch input{width:16px;height:16px;accent-color:var(--accent)}
+.dfrgrid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+.dfrgrid label{display:flex;flex-direction:column;gap:3px;font:12px var(--mono);color:var(--muted)}
+.dfrgrid select{padding:4px;border:1px solid var(--line);border-radius:5px;background:var(--panel);font-family:var(--mono)}
+.dfrgrid select[data-r="1"]{border-color:var(--neg)}
+.dfrgrid select.bad{border-color:var(--bad);color:var(--bad);font-weight:700}
+.dfrgrid option.inval{color:var(--bad)}
+.graytbl{overflow-x:auto}
+.graytbl table{border-collapse:collapse;font:12px var(--mono)}
+.graytbl th,.graytbl td{border:1px solid var(--line-soft);padding:2px 4px;text-align:center}
+.graytbl th{color:var(--muted);font-weight:500;font-family:var(--sans);text-align:left;white-space:nowrap}
+.graytbl input{width:40px;border:0;background:transparent;text-align:center;font:inherit}
+.note{border-left:3px solid var(--mark);background:var(--sunk);padding:8px 10px;font-size:12.5px;margin-top:8px;border-radius:0 5px 5px 0}
+
+/* output */
+.out{position:sticky;top:76px;display:flex;flex-direction:column;max-height:calc(100vh - 92px)}
+.outhead{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.outhead h2{font-size:14px;margin:0 auto 0 0;font-weight:600}
+pre.code{margin:0;padding:10px 0;overflow:auto;font:12px/1.65 var(--mono);flex:1;min-height:200px;background:var(--sunk)}
+pre.code .ln{display:block;padding:0 12px 0 0;white-space:pre}
+pre.code .ln::before{content:attr(data-n);display:inline-block;width:38px;padding-right:10px;text-align:right;color:var(--muted);opacity:.6}
+pre.code .ln.chg{background:color-mix(in srgb,var(--mark) 18%,transparent)}
+pre.code .cm{color:var(--ok)}
+.diff{padding:6px 12px 10px;font-size:12.5px;flex:0 0 var(--diffH,150px);overflow:auto}
+.diff h3{font-size:13px;margin:0 0 6px;font-weight:600}
+.diff ul{margin:0;padding-left:18px;font:12px/1.6 var(--mono)}
+.diff .none{color:var(--muted)}
+.errs{color:var(--bad);font-size:12.5px;padding:0 12px 8px}
+.errs:empty{display:none}
+
+/* log */
+table.log{width:100%;border-collapse:collapse;font-size:13px}
+.log th{text-align:left;color:var(--muted);font-weight:500;border-bottom:1px solid var(--line);padding:6px 8px;white-space:nowrap}
+.log td{border-bottom:1px solid var(--line-soft);padding:8px;vertical-align:top}
+.log td.m{font:12px/1.6 var(--mono);white-space:pre-wrap}
+.log .st-first{color:var(--accent)} .log .st-none{color:var(--muted)}
+.empty{color:var(--muted);padding:28px 4px;text-align:center}
+
+.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--panel);padding:9px 16px;border-radius:6px;font-size:13px;opacity:0;transition:.2s;pointer-events:none;z-index:50}
+.toast.on{opacity:1;transform:translateX(-50%)}
+@media (prefers-reduced-motion:reduce){.toast{transition:none}}
+dialog{border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);max-width:min(900px,92vw);padding:0}
+dialog::backdrop{background:rgba(0,0,0,.35)}
+dialog .dh{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line)}
+dialog pre{margin:0;padding:12px 14px;max-height:70vh;overflow:auto;font:12px/1.6 var(--mono);background:var(--sunk)}
+.demo{background:color-mix(in srgb,var(--mark) 22%,var(--panel));border-bottom:1px solid var(--line);padding:6px 20px;font-size:12.5px;color:var(--ink)}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="ident"><h1>Flicker Suppression 調適工具</h1><span class="chip">DEMO-DDIC · Page B0 / 10</span></div>
+  <div class="actions">
+    <button class="btn" id="bUndo" title="Ctrl+Z">復原</button>
+    <button class="btn" id="bRedo" title="Ctrl+Y">重做</button>
+    <button class="btn" id="bLoadTxt">載入 txt</button>
+    <button class="btn" id="bOpen">開啟專案</button>
+    <button class="btn" id="bSave">儲存專案</button>
+    <button class="btn primary" id="bExport">產出設定</button>
+    <input type="file" id="fTxt" accept=".txt">
+    <input type="file" id="fProj" accept=".json">
+  </div>
+</header>
+
+<div class="demo">Demo 版：晶片型號、Page、暫存器位址、指令序列與所有數值皆為虛構，僅展示工具功能與設計。</div>
+<main class="wrap">
+  <section class="panel">
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" aria-selected="true" data-v="vGrid">Offset 表</button>
+      <button class="tab" role="tab" aria-selected="false" data-v="vSet">系統設定</button>
+      <button class="tab" role="tab" aria-selected="false" data-v="vLog">產出紀錄<span class="badge" id="logCount">0</span></button>
+    </div>
+
+    <div class="view" id="vGrid">
+      <div class="toolbar">
+        <div class="seg" id="unitSeg" aria-label="顯示單位">
+          <button data-u="off" aria-pressed="true">實際 offset</button>
+          <button data-u="dec" aria-pressed="false">設定值</button>
+          <button data-u="hex" aria-pressed="false">Hex</button>
+        </div>
+        <div class="group">選取範圍
+          <input id="setVal" placeholder="數值" aria-label="套用數值">
+          <button class="btn small" id="bSet">套用</button>
+          <button class="btn small" id="bDec" title="−1 code (−0.25)">−0.25</button>
+          <button class="btn small" id="bInc" title="+1 code (+0.25)">+0.25</button>
+        </div>
+        <span class="selinfo" id="selInfo"></span>
+      </div>
+      <div class="gridbox"><table class="grid" id="grid"></table></div>
+      <div class="legend">
+        <span>−32</span><span class="ramp" id="ramp" title="色階與表格同步：越接近 −32 / +31.75 顏色越深"></span><span>+31.75 offset</span>
+        <span><span class="dot"></span>與上次產出不同</span>
+        <span style="color:var(--accent)">藍色底線欄 = 新增綁點</span>
+        <span>拖曳選取 · 點欄/列標題選整欄/整列 · Ctrl+V 可直接貼上 Excel 區塊 · 方向鍵移動 · Enter 下移</span>
+      </div>
+    </div>
+
+    <div class="view" id="vSet" hidden>
+      <div class="settings">
+        <fieldset>
+          <legend>FS 總開關</legend>
+          <p class="hint">REGISTER C3 · bit7 = 功能開關，bit6 固定為 1</p>
+          <label class="switch"><input type="checkbox" id="fsEn"> 開啟 Flicker Suppression</label>
+          <legend style="margin-top:14px">門檻設定</legend>
+          <p class="hint">REGISTER C4 · 12-bit（0–4095）</p>
+          <div id="thdBox"></div>
+        </fieldset>
+        <fieldset>
+          <legend>模式區域對應</legend>
+          <p class="hint">REGISTER C5 · 每個模式只能指定 Region 0 或 1，兩個一組打包成 1 byte</p>
+          <div class="dfrgrid" id="dfrBox"></div>
+          <legend style="margin-top:18px">手動觸發</legend>
+          <p class="hint">REGISTER C2 · bit7 = 手動開關，bit6–0 = 場景編號</p>
+          <label class="switch"><input type="checkbox" id="manOut"> 產出時附加手動觸發區段</label>
+          <label class="switch"><input type="checkbox" id="manEn"> 手動觸發開關</label>
+          <div class="row" style="grid-template-columns:1fr"><select id="scene" aria-label="強制觸發場景"></select></div>
+          <div class="note">手動觸發優先權高於一般場景觸發，使用時須注意。此區段預設不附加。</div>
+        </fieldset>
+        <fieldset style="grid-column:1/-1">
+          <legend>灰階綁點</legend>
+          <p class="hint">共 <span id="grayN"></span> 點，作為 Offset 表欄位標題；New 灰階綁點 = ROUNDDOWN(255 × 綁點 ÷ data remap)，僅供參考不影響輸出</p>
+          <div class="switch">data remap <input type="number" id="remap" min="1" max="255" style="width:80px;padding:3px 6px;border:1px solid var(--line);border-radius:5px;background:var(--panel);font-family:var(--mono)"></div>
+          <div class="graytbl"><table id="grayTbl"></table></div>
+        </fieldset>
+      </div>
+    </div>
+
+    <div class="view" id="vLog" hidden>
+      <div class="toolbar">
+        <span class="hint" style="margin:0">每次產出都會記錄時間、檔名與相對上一次產出的變更；清除紀錄後下次產出視為「首次產出」。</span>
+        <span style="margin-left:auto;display:flex;gap:8px">
+          <button class="btn small" id="bLogCsv">匯出紀錄 CSV</button>
+          <button class="btn small danger" id="bLogClear">清除紀錄</button>
+        </span>
+      </div>
+      <div id="logBox"></div>
+    </div>
+  </section>
+
+  <aside class="panel out">
+    <div class="hres" id="hres" role="separator" aria-orientation="vertical" aria-label="調整預覽寬度" tabindex="0" title="拖曳調整寬度，雙擊還原"></div>
+    <div class="outhead">
+      <h2>輸出預覽</h2>
+      <div class="seg" id="fmtSeg" aria-label="輸出格式">
+        <button data-f="reg" aria-pressed="true">REGISTER</button>
+        <button data-f="dcs" aria-pressed="false">dcsLongWrite</button>
+      </div>
+      <button class="btn small" id="bCopy">複製</button>
+    </div>
+    <div class="errs" id="errs"></div>
+    <pre class="code" id="code"></pre>
+    <div class="vres" id="vres" role="separator" aria-orientation="horizontal" aria-label="調整變更清單高度" tabindex="0" title="拖曳調整高度，雙擊還原"></div>
+    <div class="diff" id="diff"></div>
+  </aside>
+</main>
+
+<dialog id="dlg"><div class="dh"><strong id="dlgT"></strong><button class="btn small" id="dlgX">關閉</button></div><pre id="dlgB"></pre></dialog>
+<div class="toast" id="toast"></div>
+
+<script>
+const DEF = {"gray":[0,1,3,5,7,9,11,15,19,23,27,31,39,43,47,55,63,71,79,87,95,103,111,128,144,158,173,189,205,215,226,236,247,251,255],"remap":200,"regs":[{"label":"補償場景 01 offset (pageB0, R40h)","en":1,"v":[116,118,119,120,121,122,123,124,124,125,125,126,126,126,126,127,127,127,127,127,127,127,127,128,128,128,128,128,128,128,128,128,128,128,128]},{"label":"補償場景 02 offset (pageB0, R41h)","en":1,"v":[138,137,136,135,134,133,132,132,131,131,130,130,130,130,129,129,129,129,129,129,129,128,128,128,128,128,128,128,128,128,128,128,128,128,128]},{"label":"補償場景 03 offset (pageB0, R42h)","en":1,"v":[120,121,122,123,123,124,125,125,125,126,126,126,127,127,127,127,127,127,127,127,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]},{"label":"補償場景 04 offset (pageB0, R43h)","en":1,"v":[134,133,133,132,131,131,131,130,130,130,129,129,129,129,129,129,129,129,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]},{"label":"補償場景 05 offset (pageB0, R44h)","en":1,"v":[123,124,124,125,125,126,126,126,126,127,127,127,127,127,127,127,127,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]},{"label":"補償場景 06 offset (pageB0, R45h)","en":1,"v":[132,131,131,131,130,130,130,129,129,129,129,129,129,129,129,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]},{"label":"補償場景 07 offset (pageB0, R46h)","en":1,"v":[118,119,120,121,122,123,124,124,125,125,126,126,126,126,127,127,127,127,127,127,127,128,128,128,128,128,128,128,128,128,128,128,128,128,128]},{"label":"補償場景 08 offset (pageB0, R47h)","en":1,"v":[136,135,134,133,133,132,131,131,131,130,130,130,129,129,129,129,129,129,129,129,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]},{"label":"補償場景 09 offset (pageB0, R48h)","en":1,"v":[122,123,123,124,125,125,125,126,126,126,127,127,127,127,127,127,127,127,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]},{"label":"補償場景 10 offset (pageB0, R49h)","en":1,"v":[133,132,132,131,131,130,130,130,130,129,129,129,129,129,129,129,129,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]},{"label":"補償場景 11 offset (pageB0, R4Ah)","en":1,"v":[124,125,125,125,126,126,126,127,127,127,127,127,127,127,127,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]},{"label":"補償場景 12 offset (pageB0, R4Bh)","en":1,"v":[131,131,130,130,130,129,129,129,129,129,129,129,129,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]},{"label":"補償場景 13 offset (pageB0, R4Ch)","en":1,"v":[140,138,137,136,135,134,133,132,132,131,131,130,130,130,130,129,129,129,129,129,129,129,129,128,128,128,128,128,128,128,128,128,128,128,128]},{"label":"補償場景 14 offset (pageB0, R4Dh)","en":1,"v":[117,118,120,121,122,123,123,124,124,125,125,126,126,126,127,127,127,127,127,127,127,127,128,128,128,128,128,128,128,128,128,128,128,128,128]},{"label":"補償場景 15 offset (pageB0, R4Eh)","en":1,"v":[137,136,135,134,133,132,132,131,131,130,130,130,130,129,129,129,129,129,129,129,129,128,128,128,128,128,128,128,128,128,128,128,128,128,128]},{"label":"補償場景 16 offset (pageB0, R4Fh)","en":1,"v":[121,122,123,123,124,125,125,125,126,126,126,127,127,127,127,127,127,127,127,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]},{"label":"補償場景 17 offset (pageB0, R50h)","en":1,"v":[134,133,133,132,131,131,131,130,130,130,129,129,129,129,129,129,129,129,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]},{"label":"補償場景 18 offset (pageB0, R51h)","en":1,"v":[123,124,124,125,125,126,126,126,126,127,127,127,127,127,127,127,127,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]},{"label":"補償場景 19 offset (pageB0, R52h)","en":1,"v":[132,131,131,131,130,130,130,129,129,129,129,129,129,129,129,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]},{"label":"補償場景 20 offset (pageB0, R53h)","en":1,"v":[125,125,126,126,126,127,127,127,127,127,127,127,127,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]},{"label":"手動場景 1 (pageB0, R54h)","en":0,"v":[128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]},{"label":"手動場景 2 (pageB0, R55h)","en":0,"v":[128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]}],"fs":1,"thd":[3000,1000,2800,1200,800],"dfr":[0,0,0,0,1,1,0,1,0,1],"man":1,"scene":0,"scenes":["觸發場景 00","觸發場景 01","觸發場景 02","觸發場景 03","觸發場景 04","觸發場景 05","觸發場景 06","觸發場景 07","觸發場景 08","觸發場景 09","觸發場景 10","觸發場景 11","觸發場景 12","觸發場景 13","觸發場景 14","觸發場景 15","觸發場景 16","觸發場景 17","觸發場景 18","觸發場景 19","觸發場景 20","觸發場景 21","觸發場景 22","觸發場景 23","觸發場景 24","觸發場景 25","觸發場景 26","觸發場景 27","觸發場景 28","觸發場景 29","觸發場景 30","觸發場景 31","觸發場景 32","觸發場景 33","觸發場景 34","觸發場景 35","觸發場景 36","觸發場景 37","觸發場景 38","觸發場景 39","觸發場景 40","觸發場景 41","觸發場景 42","觸發場景 43","觸發場景 44","觸發場景 45","觸發場景 46","觸發場景 47","觸發場景 48","觸發場景 49","觸發場景 50","觸發場景 51","觸發場景 52","觸發場景 53","觸發場景 54","觸發場景 55","觸發場景 56","觸發場景 57","觸發場景 58","觸發場景 59","觸發場景 60","觸發場景 61","觸發場景 62","觸發場景 63","觸發場景 64","觸發場景 65","觸發場景 66","觸發場景 67","觸發場景 68","觸發場景 69","觸發場景 70","觸發場景 71","觸發場景 72","觸發場景 73","觸發場景 74","觸發場景 75","觸發場景 76","觸發場景 77","觸發場景 78","觸發場景 79","觸發場景 80","觸發場景 81","觸發場景 82","觸發場景 83"],"gray24":[0,1,3,5,7,9,11,15,19,23,31,39,47,55,63,79,95,111,144,173,205,226,247,255]};
+const N = DEF.gray.length, PAD = 80, KEY = 'demo_ddic_fs_tool_v1';
+/* 舊版 24 點資料 → 依灰階綁點線性內插成 N 點 */
+function expandRow(v, from, to) {
+  if (v.length === to.length) return v.slice();
+  return to.map(g => {
+    let k = from.findIndex((x, n) => n < from.length - 1 && g >= x && g <= from[n + 1]);
+    if (k < 0) k = g < from[0] ? 0 : from.length - 2;
+    const a = from[k], b = from[k + 1], t = b === a ? 0 : Math.max(0, Math.min(1, (g - a) / (b - a)));
+    return Math.round(v[k] + (v[k + 1] - v[k]) * t);
+  });
+}
+function migrate(st) {
+  if (!st || !st.regs) return st;
+  const oldGray = st.gray && st.gray.length !== N ? st.gray : DEF.gray24;
+  let touched = false;
+  st.regs.forEach(r => { if (r.v.length !== N) { r.v = expandRow(r.v, oldGray, DEF.gray); touched = true; } });
+  if (!st.gray || st.gray.length !== N) { st.gray = DEF.gray.slice(); touched = true; }
+  return touched ? (st._migrated = true, st) : st;
+}
+const $ = s => document.querySelector(s);
+const hex2 = n => (n >>> 0).toString(16).toUpperCase().padStart(2, '0');
+const THD_NAMES = ['亮度門檻 1', '亮度門檻 2', '區域門檻 1', '區域門檻 2', '區域門檻 3'];
+const THD_HINT = ['亮度區段切換', '亮度區段切換', '區域切換', '區域切換', '區域切換'];
+
+function parseLabel(l) {
+  const m = /^(.*?)\s*\(page(\w+),\s*R(\w\w)h\)/i.exec(l);
+  return { name: m[1].trim(), page: m[2], addr: m[3].toUpperCase() };
+}
+const REG_META = DEF.regs.map(r => parseLabel(r.label));
+
+function defaultState() {
+  return {
+    regs: DEF.regs.map(r => ({ en: !!r.en, v: r.v.slice() })),
+    gray: DEF.gray.slice(), remap: DEF.remap, fs: !!DEF.fs,
+    thd: DEF.thd.slice(), dfr: DEF.dfr.slice(), man: !!DEF.man, scene: DEF.scene, manOut: false
+  };
+}
+let S = defaultState();
+let store = { prev: null, prevState: null, log: [] };   // prev = 上次產出各行
+let unit = 'off', fmt = 'reg';
+
+/* ---------- 持久化 ---------- */
+function persist() { try { localStorage.setItem(KEY, JSON.stringify({ S, store, unit, fmt })); } catch (e) {} }
+function restore() {
+  try {
+    const raw = localStorage.getItem(KEY); if (!raw) return;
+    const o = JSON.parse(raw);
+    if (o.S && o.S.regs && o.S.regs.length === DEF.regs.length) S = Object.assign(defaultState(), migrate(o.S));
+    if (o.store) { store = Object.assign(store, o.store); if (store.prevState) migrate(store.prevState); }
+    if (o.unit) unit = o.unit; if (o.fmt) fmt = o.fmt;
+  } catch (e) {}
+}
+
+/* ---------- 復原 / 重做 ---------- */
+let undo = [], redo = [];
+function snap() { undo.push(JSON.stringify(S)); if (undo.length > 200) undo.shift(); redo = []; }
+function doUndo() { if (!undo.length) return; redo.push(JSON.stringify(S)); S = JSON.parse(undo.pop()); renderAll(); }
+function doRedo() { if (!redo.length) return; undo.push(JSON.stringify(S)); S = JSON.parse(redo.pop()); renderAll(); }
+
+/* ---------- 單位換算 ---------- */
+const toOff = c => (c - 128) / 4;
+function fmtCell(c) {
+  if (unit === 'dec') return String(c);
+  if (unit === 'hex') return hex2(c);
+  const o = toOff(c); return (o > 0 ? '+' : '') + o;
+}
+function parseCell(str) {
+  str = String(str).trim(); if (str === '') return null;
+  let c;
+  if (unit === 'hex') { if (!/^(0x)?[0-9a-f]{1,2}$/i.test(str)) return NaN; c = parseInt(str.replace(/^0x/i, ''), 16); }
+  else if (unit === 'dec') { if (!/^\d+$/.test(str)) return NaN; c = +str; }
+  else { const f = parseFloat(str); if (!isFinite(f)) return NaN; c = Math.round(f * 4) + 128; }
+  return c;
+}
+const clamp = c => Math.max(0, Math.min(255, c));
+
+/* ---------- 產生暫存器行 ---------- */
+function buildRows() {
+  const R = [];
+  const add = (row, cg, ch = '') => R.push({ row, cg, ch });
+  add(2, 'REGISTER,F0,03,C3,3C,10');
+  add(3, 'REGISTER,C1,01,01', '//tuning mode enable');
+  add(4, '');
+  add(5, 'REGISTER,F0,03,C3,3C,B0');
+  S.regs.forEach((r, i) => add(6 + i, 'REGISTER,' + REG_META[i].addr + ',' + N + ',' + r.v.map(hex2).join(','), '//' + REG_META[i].name));
+  add(28, '');
+  add(29, 'REGISTER,F0,03,C3,3C,10');
+  add(30, 'REGISTER,C1,01,00', '//tuning mode disable');
+  add(31, '');
+  const bits = S.regs.map(r => r.en ? 1 : 0); while (bits.length < 24) bits.push(0);
+  const ae = [0, 1, 2].map(k => bits.slice(k * 8, k * 8 + 8).reduce((a, b) => a * 2 + b, 0));
+  add(32, 'REGISTER,C6,03,' + ae.map(hex2).join(','), '//FS offset enable');
+  add(33, '');
+  const aa = S.thd.flatMap(t => [hex2((t >> 8) & 0xFF), hex2(t & 0xFF)]);
+  add(34, 'REGISTER,C4,10,' + aa.join(','), '//threshold setting');
+  add(35, '');
+  const ab = [0, 1, 2, 3, 4].map(k => hex2(S.dfr[2 * k] * 16 + S.dfr[2 * k + 1]));
+  add(36, 'REGISTER,C5,05,' + ab.join(','), '//mode region setting');
+  add(37, '');
+  add(38, 'REGISTER,C3,01,' + hex2((S.fs ? 128 : 0) + 64), '//FS enable');
+  if (S.manOut) {
+    add(39, '');
+    add(40, '//FS手動觸發功能');
+    add(41, 'REGISTER,F0,03,C3,3C,10');
+    add(42, 'REGISTER,C2,01,' + hex2((S.man ? 128 : 0) + S.scene), '//FS manual trigger');
+  }
+  return R;
+}
+function regLine(r) {
+  if (!r.ch) return r.cg;
+  return r.cg.length < PAD ? r.cg + ' '.repeat(PAD - r.cg.length) + r.ch : r.cg + '\t' + r.ch;
+}
+function dcsLine(r) {
+  if (!r.cg) return '';
+  if (r.cg.startsWith('//')) return '# ' + r.cg.slice(2);
+  const p = r.cg.split(',');
+  const s = 'dcsLongWrite(0x' + p[1] + ', [' + p.slice(3).map(x => '0x' + x).join(', ') + "], hsLpDelim='None')";
+  return r.ch ? s + '  # ' + r.ch.slice(2) : s;
+}
+function buildText(rows, f) {
+  if (f === 'dcs') return ['setLp()'].concat(rows.map(dcsLine)).join('\r\n') + '\r\n';
+  return rows.map(regLine).join('\r\n') + '\r\n';
+}
+
+/* ---------- 比對（移植自原 Excel 巨集的差異紀錄邏輯） ---------- */
+function diffRows(rows) {
+  if (!store.log.length || !store.prev) return { first: true, status: ['首次產出'], content: ['N/A'], changed: new Set() };
+  const prevMap = {}; store.prev.forEach(p => prevMap[p.row] = p.cg);
+  const allRows = new Set(rows.map(r => r.row).concat(store.prev.map(p => p.row)));
+  const curMap = {}; rows.forEach(r => curMap[r.row] = r.cg);
+  let page = 'Unknown'; const status = [], content = [], changed = new Set();
+  [...allRows].sort((a, b) => a - b).forEach(i => {
+    const cur = (curMap[i] || '').trim(), prv = (prevMap[i] || '').trim();
+    if (cur.includes('REGISTER,F0,03,C3,3C,')) { const s = cur.split(','); if (s.length > 5) page = s[5]; }
+    if (cur === prv) return;
+    changed.add(i);
+    const sp = prv.split(','), sc = cur.split(',');
+    if (sp.length === sc.length && sp.length >= 4) {
+      if (sc[1] === 'F0' && sc[2] === '03' && sc[3] === 'C3' && sc[4] === '3C') {
+        status.push('Page Setting Changed;'); content.push('Page ' + sp[5] + ' -> Page ' + sc[5]);
+      } else {
+        const name = 'Page' + page + ' R' + sc[1]; let d = '';
+        for (let j = 0; j < sp.length; j++) if (sp[j] !== sc[j]) {
+          if (j >= 3) d += '[P' + (j - 2) + ']:' + sp[j] + '->' + sc[j] + ';';
+          else if (j === 1) d += '[Addr]:' + sp[j] + '->' + sc[j] + ';';
+          else if (j === 2) d += '[Len]:' + sp[j] + '->' + sc[j] + ';';
+        }
+        if (d) { if (!status.includes(name + ';')) status.push(name + ';'); content.push(name + d); }
+      }
+    } else { status.push('Row ' + i + ' Format Change;'); content.push('Row ' + i + ': 指令架構變更;'); }
+  });
+  if (!status.length) return { first: false, status: ['無變更'], content: ['沒有偵測到任何設定修改'], changed };
+  return { first: false, status, content, changed };
+}
+
+/* ---------- 驗證 ---------- */
+function validate() {
+  const e = [];
+  S.regs.forEach((r, i) => r.v.forEach((c, j) => { if (!(c >= 0 && c <= 255)) e.push(REG_META[i].name + ' 第 ' + (j + 1) + ' 點超出 0–255'); }));
+  S.thd.forEach((t, i) => { if (!(Number.isInteger(t) && t >= 0 && t <= 4095)) e.push(THD_NAMES[i] + ' 需為 0–4095 的整數'); });
+  if (!(Number.isInteger(S.remap) && S.remap > 0)) e.push('data remap 需為正整數');
+  S.dfr.forEach((r, k) => { if (r !== 0 && r !== 1) e.push('模式 ' + k + ' 只能設定 Region 0 或 1（目前為 ' + r + '）'); });
+  return e;
+}
+
+/* ---------- Offset 表 ---------- */
+const grid = $('#grid'); let cells = []; let sel = null, anchor = null, dragging = false;
+function buildGrid() {
+  let h = '<thead><tr><th class="corner">暫存器 / 灰階綁點</th>';
+  for (let j = 0; j < N; j++) h += '<th data-col="' + j + '" class="' + (DEF.gray24.includes(DEF.gray[j]) ? '' : 'newpt') + '" title="選取整欄"><span class="gl">P' + (j + 1) + '</span><span class="gv" id="gh' + j + '"></span></th>';
+  h += '</tr></thead><tbody>';
+  S.regs.forEach((r, i) => {
+    const m = REG_META[i], grp = (i === 6 || i === 12 || i === 20) ? ' grp' : '';
+    h += '<tr data-r="' + i + '" class="' + grp + '"><th class="rh"><label><input type="checkbox" data-en="' + i + '" title="FS offset 開關">'
+      + '<span class="nm" data-row="' + i + '" title="選取整列">' + m.name.replace(' offset', '') + '</span><span class="ad">R' + m.addr + '</span></label></th>';
+    for (let j = 0; j < N; j++) h += '<td data-i="' + i + '" data-j="' + j + '"><input aria-label="' + m.name + ' P' + (j + 1) + '" spellcheck="false"></td>';
+    h += '</tr>';
+  });
+  grid.innerHTML = h + '</tbody>';
+  cells = S.regs.map((_, i) => [...grid.querySelectorAll('td[data-i="' + i + '"]')]);
+}
+/* 色階範圍 = offset 全範圍 −32 ~ +31.75；用平方根曲線，讓 ±0.25~±3 的小 offset 仍看得出顏色 */
+const OFF_MIN = -32, OFF_MAX = 31.75, MAX_MIX = 72;
+function offColor(o) {
+  if (!o) return 'var(--panel)';
+  const a = Math.sqrt(Math.min(Math.abs(o) / (o < 0 ? -OFF_MIN : OFF_MAX), 1)) * MAX_MIX;
+  return 'color-mix(in srgb, var(' + (o < 0 ? '--neg' : '--pos') + ') ' + a.toFixed(1) + '%, var(--panel))';
+}
+function cellColor(c) { const o = toOff(c); return o ? offColor(o) : ''; }
+function paintRamp() {   // 圖例用同一個函式取樣，確保和表格顏色一致
+  const stops = [];
+  for (let k = 0; k <= 32; k++) { const o = OFF_MIN + (OFF_MAX - OFF_MIN) * k / 32; stops.push(offColor(Math.abs(o) < 1e-9 ? 0 : o) + ' ' + (k / 32 * 100).toFixed(2) + '%'); }
+  $('#ramp').style.background = 'linear-gradient(90deg,' + stops.join(',') + ')';
+}
+function paintCell(i, j) {
+  const td = cells[i][j], c = S.regs[i].v[j], inp = td.firstChild;
+  if (document.activeElement !== inp) inp.value = fmtCell(c);
+  td.style.background = cellColor(c);
+  const pv = store.prevState && store.prevState.regs[i] ? store.prevState.regs[i].v[j] : c;
+  td.classList.toggle('chg', !!store.log.length && pv !== c);
+}
+function paintGrid() {
+  S.regs.forEach((r, i) => {
+    for (let j = 0; j < N; j++) paintCell(i, j);
+    grid.querySelector('[data-en="' + i + '"]').checked = r.en;
+    grid.querySelector('tr[data-r="' + i + '"]').classList.toggle('off', !r.en);
+  });
+  for (let j = 0; j < N; j++) $('#gh' + j).textContent = S.gray[j];
+  paintSel();
+}
+function paintSel() {
+  grid.querySelectorAll('td.sel').forEach(td => td.classList.remove('sel'));
+  if (!sel) { $('#selInfo').textContent = ''; return; }
+  const vals = [];
+  for (let i = sel.r0; i <= sel.r1; i++) for (let j = sel.c0; j <= sel.c1; j++) { cells[i][j].classList.add('sel'); vals.push(toOff(S.regs[i].v[j])); }
+  $('#selInfo').textContent = vals.length > 1 ? vals.length + ' 格 · offset ' + Math.min(...vals) + ' ~ ' + Math.max(...vals) : '';
+}
+function setSel(a, b) {
+  sel = { r0: Math.min(a.i, b.i), r1: Math.max(a.i, b.i), c0: Math.min(a.j, b.j), c1: Math.max(a.j, b.j) };
+  paintSel();
+}
+function forSel(fn) { if (!sel) return; for (let i = sel.r0; i <= sel.r1; i++) for (let j = sel.c0; j <= sel.c1; j++) fn(i, j); }
+const pos = el => { const td = el.closest('td[data-i]'); return td ? { i: +td.dataset.i, j: +td.dataset.j } : null; };
+function focusCell(i, j, extend) {
+  i = Math.max(0, Math.min(S.regs.length - 1, i)); j = Math.max(0, Math.min(N - 1, j));
+  const inp = cells[i][j].firstChild; inp.focus(); inp.select();
+  if (extend && anchor) setSel(anchor, { i, j }); else { anchor = { i, j }; setSel(anchor, anchor); }
+}
+
+grid.addEventListener('mousedown', e => {
+  const th = e.target.closest('th[data-col]');
+  if (th) { const j = +th.dataset.col; anchor = { i: 0, j }; setSel(anchor, { i: S.regs.length - 1, j }); e.preventDefault(); return; }
+  const nm = e.target.closest('.nm');
+  if (nm) { const i = +nm.dataset.row; anchor = { i, j: 0 }; setSel(anchor, { i, j: N - 1 }); e.preventDefault(); return; }
+  const p = pos(e.target); if (!p) return;
+  if (e.shiftKey && anchor) { setSel(anchor, p); e.preventDefault(); return; }
+  anchor = p; setSel(p, p); dragging = true;
+});
+grid.addEventListener('mouseover', e => { if (!dragging) return; const p = pos(e.target); if (p) setSel(anchor, p); });
+window.addEventListener('mouseup', () => dragging = false);
+grid.addEventListener('change', e => {
+  if (e.target.dataset.en !== undefined) { snap(); S.regs[+e.target.dataset.en].en = e.target.checked; changed(); return; }
+  const p = pos(e.target); if (!p) return;
+  commitCell(p.i, p.j, e.target);
+});
+function commitCell(i, j, inp) {
+  const c = parseCell(inp.value);
+  if (c === null || isNaN(c) || c < 0 || c > 255) { inp.value = fmtCell(S.regs[i].v[j]); if (c !== null) toast('數值超出範圍：設定值 0–255，offset −32 ~ +31.75'); return; }
+  if (c !== S.regs[i].v[j]) { snap(); S.regs[i].v[j] = c; }
+  inp.value = fmtCell(c); changed();
+}
+grid.addEventListener('keydown', e => {
+  const p = pos(e.target); if (!p) return;
+  const mv = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] }[e.key];
+  if (mv) {
+    const inp = e.target, atEdge = e.key === 'ArrowUp' || e.key === 'ArrowDown' || inp.selectionStart === inp.selectionEnd && (e.key === 'ArrowLeft' ? inp.selectionStart === 0 : inp.selectionStart === inp.value.length) || inp.selectionStart === 0 && inp.selectionEnd === inp.value.length;
+    if (!atEdge) return;
+    e.preventDefault(); commitCell(p.i, p.j, inp);
+    const base = e.shiftKey && sel ? { i: anchor.i === sel.r0 ? sel.r1 : sel.r0, j: anchor.j === sel.c0 ? sel.c1 : sel.c0 } : p;
+    if (e.shiftKey) { const t = { i: Math.max(0, Math.min(S.regs.length - 1, base.i + mv[0])), j: Math.max(0, Math.min(N - 1, base.j + mv[1])) }; setSel(anchor, t); }
+    else focusCell(p.i + mv[0], p.j + mv[1]);
+  } else if (e.key === 'Enter') { e.preventDefault(); commitCell(p.i, p.j, e.target); focusCell(p.i + (e.shiftKey ? -1 : 1), p.j); }
+  else if (e.key === 'Escape') { e.target.value = fmtCell(S.regs[p.i].v[p.j]); e.target.select(); }
+});
+grid.addEventListener('focusin', e => { const p = pos(e.target); if (p) { e.target.select(); if (!dragging && !(sel && p.i >= sel.r0 && p.i <= sel.r1 && p.j >= sel.c0 && p.j <= sel.c1)) { anchor = p; setSel(p, p); } } });
+grid.addEventListener('paste', e => {
+  const p = pos(e.target); if (!p) return;
+  const txt = (e.clipboardData || window.clipboardData).getData('text');
+  if (!/[\t\n]/.test(txt.trim())) return;
+  e.preventDefault();
+  const rows = txt.replace(/\r/g, '').replace(/\n$/, '').split('\n').map(l => l.split('\t'));
+  let bad = 0, n = 0; snap();
+  rows.forEach((cols, di) => cols.forEach((v, dj) => {
+    const i = p.i + di, j = p.j + dj; if (i >= S.regs.length || j >= N) return;
+    const c = parseCell(v); if (c === null) return;
+    if (isNaN(c) || c < 0 || c > 255) { bad++; return; }
+    S.regs[i].v[j] = c; n++;
+  }));
+  setSel(p, { i: Math.min(p.i + rows.length - 1, S.regs.length - 1), j: Math.min(p.j + Math.max(...rows.map(r => r.length)) - 1, N - 1) });
+  changed(); toast('已貼上 ' + n + ' 格' + (bad ? '，' + bad + ' 格格式不符已略過' : ''));
+});
+$('#bSet').onclick = () => {
+  const c = parseCell($('#setVal').value);
+  if (!sel) return toast('請先在表格中選取範圍');
+  if (c === null || isNaN(c) || c < 0 || c > 255) return toast('請輸入有效數值（依目前顯示單位）');
+  snap(); forSel((i, j) => S.regs[i].v[j] = c); changed();
+};
+const nudge = d => { if (!sel) return toast('請先在表格中選取範圍'); snap(); forSel((i, j) => S.regs[i].v[j] = clamp(S.regs[i].v[j] + d)); changed(); };
+$('#bInc').onclick = () => nudge(1); $('#bDec').onclick = () => nudge(-1);
+$('#setVal').addEventListener('keydown', e => { if (e.key === 'Enter') $('#bSet').click(); });
+
+$('#unitSeg').onclick = e => { const b = e.target.closest('button'); if (!b) return; unit = b.dataset.u; segSync(); paintGrid(); persist(); };
+$('#fmtSeg').onclick = e => { const b = e.target.closest('button'); if (!b) return; fmt = b.dataset.f; segSync(); renderOut(); persist(); };
+function segSync() {
+  document.querySelectorAll('#unitSeg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.u === unit));
+  document.querySelectorAll('#fmtSeg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.f === fmt));
+  $('#setVal').placeholder = unit === 'off' ? '例 −1.25' : unit === 'hex' ? '例 7F' : '例 123';
+}
+
+/* ---------- 系統設定 ---------- */
+function buildSettings() {
+  $('#thdBox').innerHTML = THD_NAMES.map((n, i) => '<div class="row" id="thdRow' + i + '"><span class="k">' + n + '<small>' + THD_HINT[i] + '</small></span>'
+    + '<input type="number" min="0" max="4095" step="1" data-thd="' + i + '"><span class="hx" id="thdHx' + i + '"></span></div>').join('');
+  $('#dfrBox').innerHTML = S.dfr.map((_, k) => '<label>模式 ' + k + '<select data-dfr="' + k + '">' + [0, 1].map(r => '<option value="' + r + '">Region ' + r + '</option>').join('') + '</select></label>').join('');
+  $('#scene').innerHTML = DEF.scenes.map((s, k) => '<option value="' + k + '">' + s + '</option>').join('');
+  let g = '<tr><th>綁點</th>' + S.gray.map((_, j) => '<td><input type="number" data-gray="' + j + '" min="0" max="255"></td>').join('') + '</tr>';
+  g += '<tr><th>New 綁點</th>' + S.gray.map((_, j) => '<td id="ng' + j + '"></td>').join('') + '</tr>';
+  $('#grayTbl').innerHTML = g; $('#grayN').textContent = N;
+}
+function paintSettings() {
+  $('#fsEn').checked = S.fs; $('#manEn').checked = S.man; $('#manOut').checked = S.manOut;
+  $('#scene').value = S.scene; $('#remap').value = S.remap;
+  S.thd.forEach((t, i) => {
+    const inp = document.querySelector('[data-thd="' + i + '"]'); if (document.activeElement !== inp) inp.value = t;
+    const ok = Number.isInteger(t) && t >= 0 && t <= 4095;
+    $('#thdRow' + i).classList.toggle('err', !ok); $('#thdHx' + i).textContent = ok ? '0x' + t.toString(16).toUpperCase().padStart(3, '0') : '—';
+  });
+  S.dfr.forEach((r, k) => {
+    const s = document.querySelector('[data-dfr="' + k + '"]'), ok = r === 0 || r === 1;
+    let inv = s.querySelector('option.inval');
+    if (!ok) {   // 舊資料或載入的 txt 含 0/1 以外的值：顯示出來並標紅，但不能再選回去
+      if (!inv) { inv = document.createElement('option'); inv.className = 'inval'; inv.disabled = true; s.appendChild(inv); }
+      inv.value = r; inv.textContent = 'Region ' + r + '（不允許）';
+    } else if (inv) inv.remove();
+    s.value = r; s.dataset.r = r; s.classList.toggle('bad', !ok);
+  });
+  S.gray.forEach((v, j) => {
+    const inp = document.querySelector('[data-gray="' + j + '"]'); if (document.activeElement !== inp) inp.value = v;
+    $('#ng' + j).textContent = S.remap > 0 ? Math.floor(255 * v / S.remap) : '—';
+  });
+}
+document.getElementById('vSet').addEventListener('change', e => {
+  const t = e.target; snap();
+  if (t.id === 'fsEn') S.fs = t.checked;
+  else if (t.id === 'manEn') S.man = t.checked;
+  else if (t.id === 'manOut') S.manOut = t.checked;
+  else if (t.id === 'scene') S.scene = +t.value;
+  else if (t.id === 'remap') S.remap = Number(t.value);
+  else if (t.dataset.thd !== undefined) S.thd[+t.dataset.thd] = t.value === '' ? NaN : Number(t.value);
+  else if (t.dataset.dfr !== undefined) S.dfr[+t.dataset.dfr] = +t.value;
+  else if (t.dataset.gray !== undefined) S.gray[+t.dataset.gray] = Number(t.value);
+  changed();
+});
+
+/* ---------- 輸出預覽 ---------- */
+let lastRows = [];
+function esc(s) { return s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+function renderOut() {
+  const rows = lastRows = buildRows(), d = diffRows(rows), errs = validate();
+  const text = buildText(rows, fmt).replace(/\r\n$/, '');
+  const lines = text.split('\r\n');
+  const rowFor = fmt === 'dcs' ? [null].concat(rows.map(r => r.row)) : rows.map(r => r.row);
+  $('#code').innerHTML = lines.map((l, k) => {
+    const isCm = l.startsWith('//') || l.startsWith('#');
+    let html = esc(l);
+    if (!isCm) html = html.replace(/(\s+)(\/\/.*|# .*)$/, '$1<span class="cm">$2</span>');
+    else html = '<span class="cm">' + html + '</span>';
+    const chg = rowFor[k] != null && d.changed.has(rowFor[k]);
+    return '<span class="ln' + (chg ? ' chg' : '') + '" data-n="' + (k + 1) + '">' + (html || ' ') + '</span>';
+  }).join('');
+  $('#errs').innerHTML = errs.slice(0, 6).map(esc).join('<br>') + (errs.length > 6 ? '<br>…另有 ' + (errs.length - 6) + ' 項' : '');
+  $('#bExport').disabled = errs.length > 0;
+  const df = $('#diff');
+  if (d.first) df.innerHTML = '<h3>相對上次產出</h3><p class="none">尚無產出紀錄，下次產出將記為「首次產出」。</p>';
+  else if (!d.changed.size) df.innerHTML = '<h3>相對上次產出</h3><p class="none">沒有偵測到任何設定修改</p>';
+  else df.innerHTML = '<h3>相對上次產出 · ' + d.status.length + ' 項</h3><ul>' + d.content.map(c => '<li>' + esc(c) + '</li>').join('') + '</ul>';
+}
+
+/* ---------- 產出 ---------- */
+const stamp = () => { const d = new Date(), p = n => String(n).padStart(2, '0'); return String(d.getFullYear()).slice(2) + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()); };
+const nowStr = () => { const d = new Date(), p = n => String(n).padStart(2, '0'); return d.getFullYear() + '/' + p(d.getMonth() + 1) + '/' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); };
+async function saveText(name, text, ext, desc) {
+  if (window.showSaveFilePicker) {
+    try {
+      const h = await showSaveFilePicker({ suggestedName: name, types: [{ description: desc, accept: { 'text/plain': ['.' + ext] } }] });
+      const w = await h.createWritable(); await w.write(text); await w.close(); return h.name;
+    } catch (e) { if (e.name === 'AbortError') return null; }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' })); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  return name;
+}
+$('#bExport').onclick = async () => {
+  if (validate().length) return toast('請先修正標示的錯誤');
+  const rows = buildRows(), d = diffRows(rows);
+  const ext = fmt === 'dcs' ? 'py' : 'txt';
+  const text = buildText(rows, fmt);
+  const name = await saveText('FS Register Setting ' + stamp() + '.' + ext, text, ext, fmt === 'dcs' ? 'Python 腳本' : '文字檔');
+  if (!name) return;
+  store.log.push({ t: nowStr(), file: name, fmt, status: d.status.join('\n'), content: d.content.join('\n'), out: buildText(rows, 'reg') });
+  store.prev = rows.map(r => ({ row: r.row, cg: r.cg })); store.prevState = JSON.parse(JSON.stringify(S));
+  changed(); renderLog(); toast('已產出 ' + name);
+};
+$('#bCopy').onclick = async () => {
+  const t = buildText(lastRows, fmt);
+  try { await navigator.clipboard.writeText(t); toast('已複製到剪貼簿'); }
+  catch (e) { const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('已複製到剪貼簿'); }
+};
+
+/* ---------- 紀錄 ---------- */
+function renderLog() {
+  $('#logCount').textContent = store.log.length;
+  if (!store.log.length) { $('#logBox').innerHTML = '<div class="empty">還沒有產出紀錄。按右上角「產出設定」後會記錄在這裡。</div>'; return; }
+  $('#logBox').innerHTML = '<table class="log"><thead><tr><th>時間</th><th>檔名</th><th>變更狀態</th><th>變更內容</th><th></th></tr></thead><tbody>'
+    + store.log.map((l, k) => [k, l]).reverse().map(([k, l]) => '<tr><td style="white-space:nowrap">' + esc(l.t) + '</td><td>' + esc(l.file) + '</td>'
+      + '<td class="m ' + (l.status === '首次產出' ? 'st-first' : l.status === '無變更' ? 'st-none' : '') + '">' + esc(l.status) + '</td>'
+      + '<td class="m">' + esc(l.content) + '</td><td><button class="btn small" data-show="' + k + '">檢視內容</button></td></tr>').join('')
+    + '</tbody></table>';
+}
+$('#logBox').onclick = e => {
+  const b = e.target.closest('[data-show]'); if (!b) return;
+  const l = store.log[+b.dataset.show]; $('#dlgT').textContent = l.t + '　' + l.file; $('#dlgB').textContent = l.out; $('#dlg').showModal();
+};
+$('#dlgX').onclick = () => $('#dlg').close();
+$('#bLogClear').onclick = () => {
+  if (!store.log.length) return;
+  if (!confirm('清除全部產出紀錄？下次產出會視為「首次產出」。')) return;
+  store = { prev: null, prevState: null, log: [] }; changed(); renderLog(); toast('已清除紀錄');
+};
+$('#bLogCsv').onclick = () => {
+  if (!store.log.length) return toast('沒有紀錄可匯出');
+  const q = s => '"' + String(s).replace(/"/g, '""') + '"';
+  const csv = '\uFEFF' + [['更新日期', '檔案名稱', '設定變更狀態', '設定變更內容', '產出設定內容']].concat(
+    store.log.map(l => [l.t, l.file, l.status, l.content, l.out.replace(/\r\n$/, '').split('\r\n').join('  ')])).map(r => r.map(q).join(',')).join('\r\n');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = 'FS ExportLog ' + stamp() + '.csv'; a.click();
+};
+
+/* ---------- 專案 / txt 載入 ---------- */
+$('#bSave').onclick = () => saveText('FS 調適專案 ' + stamp() + '.json', JSON.stringify({ tool: 'DEMO-DDIC-FS', ver: 1, S, store }, null, 1), 'json', '專案檔').then(n => n && toast('已儲存 ' + n));
+$('#bOpen').onclick = () => $('#fProj').click();
+$('#bLoadTxt').onclick = () => $('#fTxt').click();
+$('#fProj').onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  try {
+    const o = JSON.parse(await f.text());
+    if (!o.S || !o.S.regs || o.S.regs.length !== DEF.regs.length) throw 0;
+    snap(); S = Object.assign(defaultState(), migrate(o.S)); if (o.store) store = Object.assign({ prev: null, prevState: null, log: [] }, o.store);
+    renderAll(); toast('已開啟 ' + f.name);
+  } catch (err) { toast('無法讀取：不是此工具的專案檔'); }
+};
+$('#fTxt').onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  const txt = await f.text(); const N0 = JSON.stringify(S); const T = JSON.parse(N0); let page = '', hit = 0, old24 = 0;
+  txt.split(/\r?\n/).forEach(line => {
+    const m = /^\s*REGISTER\s*,([^\/\t]*)/i.exec(line); if (!m) return;
+    const p = m[1].split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+    const addr = p[0], data = p.slice(2).map(x => parseInt(x, 16));
+    if (addr === 'F0') { page = p[4]; return; }
+    if (page === 'B0') {
+      const i = REG_META.findIndex(m => m.addr === addr);
+      if (i >= 0 && data.length === N) { T.regs[i].v = data; hit++; }
+      else if (i >= 0 && data.length === DEF.gray24.length) { T.regs[i].v = expandRow(data, DEF.gray24, T.gray); hit++; old24++; }
+    } else if (page === '10') {
+      if (addr === 'C6' && data.length === 3) { const bits = data.flatMap(b => [7, 6, 5, 4, 3, 2, 1, 0].map(k => (b >> k) & 1)); T.regs.forEach((r, i) => r.en = !!bits[i]); hit++; }
+      else if (addr === 'C4' && data.length === 10) { T.thd = [0, 1, 2, 3, 4].map(k => data[2 * k] * 256 + data[2 * k + 1]); hit++; }
+      else if (addr === 'C5' && data.length === 5) { T.dfr = data.flatMap(b => [b >> 4, b & 15]); hit++; }
+      else if (addr === 'C3' && data.length === 1) { T.fs = !!(data[0] & 128); hit++; }
+      else if (addr === 'C2' && data.length === 1) { T.man = !!(data[0] & 128); T.scene = Math.min(data[0] & 127, DEF.scenes.length - 1); T.manOut = true; hit++; }
+    }
+  });
+  if (!hit) return toast('檔案中找不到可辨識的 REGISTER 設定');
+  undo.push(N0); redo = []; S = T; renderAll(); toast('已從 ' + f.name + ' 載入 ' + hit + ' 筆暫存器設定' + (old24 ? '（其中 ' + old24 + ' 筆為舊版 24 點，已內插成 ' + N + ' 點）' : ''));
+};
+
+/* ---------- 共用 ---------- */
+let tt; function toast(m) { const t = $('#toast'); t.textContent = m; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 2400); }
+function changed() { paintGrid(); paintSettings(); renderOut(); persist(); }
+function renderAll() { segSync(); changed(); renderLog(); }
+document.querySelector('.tabs').onclick = e => {
+  const b = e.target.closest('.tab'); if (!b) return;
+  document.querySelectorAll('.tab').forEach(t => { t.setAttribute('aria-selected', t === b); $('#' + t.dataset.v).hidden = t !== b; });
+};
+$('#bUndo').onclick = doUndo; $('#bRedo').onclick = doRedo;
+document.addEventListener('keydown', e => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  const k = e.key.toLowerCase();
+  if (k === 'z' && !e.shiftKey) { e.preventDefault(); document.activeElement && document.activeElement.blur(); doUndo(); }
+  else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); doRedo(); }
+});
+
+/* ---------- 預覽視窗大小 ---------- */
+const UIKEY = KEY + '_ui', root = document.documentElement;
+let ui = { outW: 440, diffH: 150 };
+try { Object.assign(ui, JSON.parse(localStorage.getItem(UIKEY)) || {}); } catch (e) {}
+const limW = w => Math.round(Math.max(300, Math.min(w, window.innerWidth - 460)));
+const limH = h => { const out = document.querySelector('.out'); return Math.round(Math.max(48, Math.min(h, out.clientHeight - 180))); };
+function applyUI(save) {
+  ui.outW = limW(ui.outW); root.style.setProperty('--outW', ui.outW + 'px');
+  ui.diffH = limH(ui.diffH); root.style.setProperty('--diffH', ui.diffH + 'px');
+  if (save) try { localStorage.setItem(UIKEY, JSON.stringify(ui)); } catch (e) {}
+}
+function dragger(el, axis, onMove, reset, step) {
+  el.addEventListener('pointerdown', e => {
+    e.preventDefault(); el.setPointerCapture(e.pointerId);
+    const start = axis === 'x' ? e.clientX : e.clientY, base = axis === 'x' ? ui.outW : ui.diffH;
+    el.classList.add('on'); document.body.classList.add('dragging', axis === 'x' ? 'col' : 'row');
+    const mv = ev => { onMove(base - ((axis === 'x' ? ev.clientX : ev.clientY) - start)); applyUI(false); };
+    const up = () => { el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up);
+      el.classList.remove('on'); document.body.classList.remove('dragging', 'col', 'row'); applyUI(true); };
+    el.addEventListener('pointermove', mv); el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+  });
+  el.addEventListener('dblclick', () => { reset(); applyUI(true); });
+  el.addEventListener('keydown', e => {
+    const d = { ArrowLeft: step, ArrowRight: -step, ArrowUp: step, ArrowDown: -step }[e.key];
+    if (d === undefined) return; e.preventDefault();
+    onMove((axis === 'x' ? ui.outW : ui.diffH) + d); applyUI(true);
+  });
+}
+dragger($('#hres'), 'x', v => ui.outW = v, () => ui.outW = 440, 20);
+dragger($('#vres'), 'y', v => ui.diffH = v, () => ui.diffH = 150, 20);
+window.addEventListener('resize', () => applyUI(false));
+
+paintRamp();
+restore(); buildGrid(); buildSettings(); renderAll();
+applyUI(false);
+if (S._migrated) { delete S._migrated; persist(); toast('已將先前的 24 點資料內插成 ' + N + ' 點，請確認新增綁點的 offset'); }
+</script>
+</body>
+</html>
